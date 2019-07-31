@@ -1,25 +1,6 @@
 export detrend, detrend!, demean, demean!, bandpass, bandpass!, bandstop, bandstop!,
        lowpass, lowpass!, highpass, highpass!, phase!, phase
-import Statistics.mean
-import LinearAlgebra.pinv
-using DSP
 # Signal processing functions for arrays (rather than SeisData or SeisChannel)
-
-"""
-    lstsq(A,X)
-
-Least-squares regression of array `A` using the pseudo-inverse.
-
-Solves the equation `A X = B` by computing a vector `X` that
-    minimizes the Euclidean 2-norm `|| B - A X ||^2`.
-
-# Arguments
-- `A::AbstractArray`: Coefficient matrix.
-- `X::AbstractArray`: Dependent variable.
-"""
-function lstsq(A::AbstractArray,X::AbstractArray)
-    coeff = pinv(A' * A) * A' * X
-end
 
 """
     detrend!(X::AbstractArray{<:Union{Float32,Float64},1})
@@ -30,8 +11,8 @@ function detrend!(X::AbstractArray{<:Union{Float32,Float64},1})
     N = length(X)
     A = ones(N,2)
     A[:,1] = Array(1:N) ./ N
-    coeff = lstsq(A,X)
-    X[:] = X .- A *coeff
+    coeff = A \ X
+    X[:] .= X .- A *coeff
     return nothing
 end
 detrend(A::AbstractArray{<:Union{Float32,Float64},1}) = (U = deepcopy(A);
@@ -46,9 +27,13 @@ function detrend!(X::AbstractArray{<:Union{Float32,Float64},2})
     M,N = size(X)
     A = ones(M,2)
     A[:,1] = Array(1:M) ./ M
+
+    # solve least-squares through qr decomposition
+    Q,R = qr(A)
+    rq = inv(factorize(R)) * Q'
     for ii = 1:N
-        coeff = lstsq(A,X[:,ii])
-        X[:,ii] = X[:,ii] .- A *coeff
+        coeff = rq * X[:,ii]
+        X[:,ii] .-=  A *coeff
     end
     return nothing
 end
