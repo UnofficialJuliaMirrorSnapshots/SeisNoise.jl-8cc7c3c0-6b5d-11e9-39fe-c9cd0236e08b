@@ -171,7 +171,23 @@ function corrmap(A::Array{FFTData,1},maxlag::Float64, smoothing_half_win::Int,
                  fill(smoothing_half_win,length(A)),
                  fill(corr_type,length(A)),fill(OUTDIR,length(A)))
         end
-    end
+end
+
+function corrmap(A::Array{FFTData,1},maxlag::Float64, smoothing_half_win::Int,
+                 corr_type::String,OUTDIR::String,
+                 interval::Union{Month,Day,Hour,Second})
+        N = size(A,1)
+
+        # copy the current FFT and correlate against all remaining
+        for ii = 1:N-1
+            FFT = pop!(A)
+            out = fill(deepcopy(FFT),length(A))
+            pmap(map_cc,out,A,fill(maxlag,length(A)),
+                 fill(smoothing_half_win,length(A)),
+                 fill(corr_type,length(A)),fill(OUTDIR,length(A)),
+                 fill(interval,length(A)))
+        end
+end
 
 """
   map_cc(FFT1,FFT2,maxlag,smoothing_half_win,corr_type,OUTDIR)
@@ -197,6 +213,21 @@ function map_cc(FFT1::FFTData,FFT2::FFTData,maxlag::Float64,
     println("Correlation $(FFT1.name), $(FFT2.name)")
     C = compute_cc(FFT1,FFT2,maxlag,
                    smoothing_half_win=smoothing_half_win,corr_type=corr_type)
-    save_corr(C,OUTDIR)
+    if !isnothing(C)
+        save_corr(C,OUTDIR)
+    end
+    return nothing
+end
+
+function map_cc(FFT1::FFTData,FFT2::FFTData,maxlag::Float64,
+                smoothing_half_win::Int,corr_type::String,OUTDIR::String,
+                interval::Union{Month,Day,Hour,Second})
+    println("Correlation $(FFT1.name), $(FFT2.name)")
+    C = compute_cc(FFT1,FFT2,maxlag,
+                   smoothing_half_win=smoothing_half_win,corr_type=corr_type)
+    if !isnothing(C)
+        stack!(C,interval=interval)
+        save_corr(C,OUTDIR)
+    end
     return nothing
 end

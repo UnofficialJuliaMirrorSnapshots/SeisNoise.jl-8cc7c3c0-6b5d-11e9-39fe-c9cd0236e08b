@@ -36,7 +36,7 @@ function compute_fft(S::SeisData,freqmin::Float64,freqmax::Float64,fs::Float64,
               with max std = $max_std.")
     end
     A = A[:,ind]
-    start = starts[ind]
+    starts = starts[ind]
     FFT = process_fft(A, freqmin, freqmax, fs, time_norm=time_norm,
                       to_whiten=to_whiten)
     return F = FFTData(S[1].id, Dates.format(u2d(starts[1]),"Y-mm-dd"),
@@ -95,7 +95,7 @@ function compute_fft(S::SeisData,freqmin::Float64,freqmax::Float64,fs::Float64,
         whitemin = freqmin
     end
     if isnothing(whitemax)
-        whitemax = freqmin
+        whitemax = freqmax
     end
     FFT = process_fft(A, whitemin, whitemax, fs, time_norm=time_norm,
                       to_whiten=to_whiten)
@@ -317,12 +317,7 @@ function remove_response!(S::SeisData, stationXML::String, freqmin::Float64,
         setindex!(S.loc,LOC,ii)
         setindex!(S.gain,GAIN,ii)
         setindex!(S.units,UNITS,ii)
-        translate_resp!(S,RESP,C=ii,wl=wl)
-
-        # note instrument response removal
-        notestr = string("translate_resp!, wl = ", wl,
-                         ", stationXML = ", stationXML)
-        note!(S,ii,notestr)
+        translate_resp!(S,RESP,chans=ii,wl=wl)
     end
     return nothing
 end
@@ -333,7 +328,7 @@ remove_response(S::SeisData, stationXML::String, freqmin::Float64,
                              wl=wl); return U)
 
 """
-  read_stationXML!(stationXML)
+  read_stationXML(stationXML)
 
 Reads instrument response from stationXML file.
 
