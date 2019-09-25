@@ -1,4 +1,4 @@
-export process_raw, process_raw!, process_fft, compute_fft, whiten, remove_response!, read_stationXML
+export process_raw, process_raw!, process_fft, compute_fft, whiten, remove_response!, remove_response
 """
     compute_fft(S, freqmin, freqmax, fs, cc_step, cc_len;
                 time_norm=false, to_whiten=false, max_std=5.)
@@ -21,22 +21,44 @@ function compute_fft(S::SeisData,freqmin::Float64,freqmax::Float64,fs::Float64,
                      cc_step::Int, cc_len::Int;
                      time_norm::Union{Bool,String}=false,
                      to_whiten::Bool=false,
-                     max_std::Float64=5.)
+                     max_std::Float64=5.,
+                     ϕshift::Bool=true)
 
     # sync!(S,s=starttime,t=endtime)
     merge!(S)
     ungap!(S)
-    process_raw!(S,fs)  # demean, detrend, taper, lowpass, downsample
+    process_raw!(S,fs,ϕshift=ϕshift)  # demean, detrend, taper, lowpass, downsample
+
+    # subset by time
     starttime, endtime = u2d.(nearest_start_end(S[1],cc_len, cc_step))
+    # check if waveform length is < cc_len
+    if Int(floor((endtime - starttime).value / 1000)) < cc_len
+        return nothing
+    end
+
     sync!(S,s=starttime,t=endtime)
     A, starts, ends = slide(S[1], cc_len, cc_step)
-    ind = std_threshold(A,max_std)
-    if length(ind) == 0
-        error("No windows remaining for day $(Dates.format(u2d(starts[1]),"Y-mm-dd"))
-              with max std = $max_std.")
+
+    # remove nonzero columns
+    zeroind = nonzero(A)
+    if length(zeroind) == 0
+        return nothing
+    elseif size(A,2) != length(zeroind)
+        A = A[:,zeroind]
+        starts = starts[zeroind]
+        ends = ends[zeroind]
     end
-    A = A[:,ind]
-    starts = starts[ind]
+
+    # amplitude threshold indices
+    stdind = std_threshold(A,max_std)
+    if length(stdind) == 0
+        return nothing
+    elseif size(A,2) != length(stdind)
+        A = A[:,stdind]
+        starts = starts[stdind]
+        ends = ends[stdind]
+    end
+
     FFT = process_fft(A, freqmin, freqmax, fs, time_norm=time_norm,
                       to_whiten=to_whiten)
     return F = FFTData(S[1].id, Dates.format(u2d(starts[1]),"Y-mm-dd"),
@@ -70,25 +92,43 @@ function compute_fft(S::SeisData,freqmin::Float64,freqmax::Float64,fs::Float64,
                      time_norm::Union{Bool,String}=false,
                      to_whiten::Bool=false, max_std::Float64=5.,
                      whitemin::Union{Nothing,Float64}=nothing,
-                     whitemax::Union{Nothing,Float64}=nothing)
+                     whitemax::Union{Nothing,Float64}=nothing,
+                     ϕshift::Bool=true)
 
     # sync!(S,s=starttime,t=endtime)
     merge!(S)
     ungap!(S)
-    process_raw!(S,fs)  # demean, detrend, taper, lowpass, downsample
+    process_raw!(S,fs,ϕshift=ϕshift)  # demean, detrend, taper, lowpass, downsample
+
+    # subset by time
     starttime, endtime = u2d.(nearest_start_end(S[1],cc_len, cc_step))
+    # check if waveform length is < cc_len
+    if Int(floor((endtime - starttime).value / 1000)) < cc_len
+        return nothing
+    end
     sync!(S,s=starttime,t=endtime) # sync start and end times
     remove_response!(S,stationXML,freqmin,freqmax) # remove inst response
     A, starts, ends = slide(S[1], cc_len, cc_step) # cut waveform into windows
 
-    # amplitude threshold indices
-    ind = std_threshold(A,max_std)
-    if length(ind) == 0
-        error("No windows remaining for day $(Dates.format(u2d(starts[1]),"Y-mm-dd"))
-              with max std = $max_std.")
+    # remove nonzero columns
+    zeroind = nonzero(A)
+    if length(zeroind) == 0
+        return nothing
+    elseif size(A,2) != length(zeroind)
+        A = A[:,zeroind]
+        starts = starts[zeroind]
+        ends = ends[zeroind]
     end
-    A = A[:,ind]
-    starts = starts[ind]
+
+    # amplitude threshold indices
+    stdind = std_threshold(A,max_std)
+    if length(stdind) == 0
+        return nothing
+    elseif size(A,2) != length(stdind)
+        A = A[:,stdind]
+        starts = starts[stdind]
+        ends = ends[stdind]
+    end
 
     # check whitening frequencies
     if isnothing(whitemin)
@@ -119,21 +159,20 @@ Pre-process raw seismic data.
 - `S::SeisData`: SeisData structure.
 - `fs::Float64`: Sampling rate to downsample `S`.
 """
-function process_raw!(S::SeisData, fs::Float64)
+function process_raw!(S::SeisData, fs::Float64; ϕshift::Bool=true)
     for ii = 1:S.n
-        demean!(S[ii].x)        # remove mean from channel
+        SeisIO.detrend!(S[ii])         # remove mean & trend from channel
         if fs ∉ S.fs
-            detrend!(S[ii].x)       # remove linear trend from channel
-            taper!(S[ii].x,S[ii].fs)         # taper channel ends
+            SeisNoise.taper!(S[ii].x,S[ii].fs)         # taper channel ends
             lowpass!(S[ii].x,fs/2,S[ii].fs)    # lowpass filter before downsampling
             S[ii] = downsample(S[ii],fs) # downsample to lower fs
         end
-        phase_shift!(S[ii]) # timing offset from sampling period
+        phase_shift!(S[ii], ϕshift=ϕshift) # timing offset from sampling period
     end
     return nothing
 end
-process_raw(S::SeisData, fs::Float64) = (U = deepcopy(S);
-            process_raw!(U,fs); return U)
+process_raw(S::SeisData, fs::Float64; ϕshift::Bool=true) = (U = deepcopy(S);
+            process_raw!(U,fs,ϕshift=ϕshift); return U)
 
 """
     process_fft(A::AbstractArray,freqmin::Float64,freqmax::Float64,fs::Float64;
@@ -296,7 +335,8 @@ function remove_response!(S::SeisData, stationXML::String, freqmin::Float64,
         error("$stationXML does not exist. Instrument response not removed.")
     end
 
-    R = read_stationXML(stationXML)
+    s,e = string.(start_end(S[1]))
+    R = read_sxml(stationXML,s=s,t=e)
     # loop through responses
     Rid = R.id
     Sid = S.id
@@ -328,20 +368,21 @@ remove_response(S::SeisData, stationXML::String, freqmin::Float64,
                              wl=wl); return U)
 
 """
-  read_stationXML(stationXML)
+nonzero(A)
 
-Reads instrument response from stationXML file.
-
-Returns a SeisData object with an instrument response for each channel in
-the stationXML file.
-
-# Arguments
-- `stationXML::String`: Path to stationXML file, e.g. "/path/to/file.xml"
-
+Find indices of all nonzero columns in array `A`.
 """
-function read_stationXML(stationXML::String)
-    io = open(stationXML, "r")
-    xsta = read(io, String)
-    close(io)
-    return SeisIO.FDSN_sta_xml(xsta)
+function nonzero(A::AbstractArray)
+    Nrows, Ncols = size(A)
+    ind = Int64[]
+    sizehint!(ind,Ncols)
+    for ii = 1:Ncols
+        for jj = 1:Nrows
+            if !iszero(A[jj,ii])
+                append!(ind,ii)
+                break
+            end
+        end
+    end
+    return ind
 end
