@@ -29,6 +29,7 @@ include("correlation.jl")
 include("rotation.jl")
 include("VelocityChange/MWCS.jl")
 include("VelocityChange/Stretching.jl")
+include("VelocityChange/Wavelets.jl")
 include("Plotting/plotting.jl")
 
 end # module
